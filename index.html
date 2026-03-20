@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor Multiparamétrico</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; height: 100vh; }
+
+/* --- Config Screen --- */
+#config-screen {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100vh; gap: 12px;
+}
+#config-screen h1 { color: #00FF00; font-size: 28px; margin-bottom: 16px; }
+.config-row { display: flex; align-items: center; gap: 10px; width: 420px; }
+.config-row label { flex: 1; text-align: right; font-size: 14px; }
+.config-row select, .config-row input {
+  flex: 1; background: #1a1a2e; color: #fff; border: 1px solid #333355;
+  border-radius: 4px; padding: 6px 10px; font-size: 14px; outline: none;
+}
+.config-row .nibp-group { flex: 1; display: flex; gap: 4px; align-items: center; }
+.config-row .nibp-group input { flex: 1; }
+.config-row .nibp-group span { color: #aaa; }
+#btn-start {
+  margin-top: 20px; padding: 14px 48px; font-size: 18px; font-weight: bold;
+  background: #004400; color: #00FF00; border: 2px solid #00FF00;
+  border-radius: 8px; cursor: pointer;
+}
+#btn-start:hover { background: #006600; }
+
+/* --- Monitor Screen --- */
+#monitor-screen { display: none; height: 100vh; flex-direction: column; }
+#monitor-top { display: flex; flex: 1; min-height: 0; }
+#waveform-area { flex: 65; display: flex; flex-direction: column; gap: 2px; padding: 4px; min-width: 0; }
+#waveform-area canvas { flex: 1; width: 100%; min-height: 0; }
+#param-panel { flex: 35; display: flex; flex-direction: column; gap: 4px; padding: 8px; overflow-y: auto; }
+
+/* Alarm indicator */
+#alarm-indicator {
+  display: none; text-align: center; font-size: 18px; font-weight: bold;
+  color: #FF0000; background: #330000; border: 2px solid #FF0000;
+  border-radius: 4px; padding: 6px;
+}
+
+/* Parameter frame */
+.param-frame {
+  border: 1px solid #333355; border-radius: 6px; background: #0a0a14;
+  padding: 6px 12px; display: flex; flex-direction: column;
+}
+.param-name { font-size: 13px; }
+.param-value { font-size: 40px; font-weight: bold; text-align: right; line-height: 1.1; }
+.param-unit { font-size: 12px; text-align: right; }
+
+/* Toolbar */
+#toolbar {
+  display: flex; gap: 8px; padding: 6px 12px; background: #0a0a14;
+  flex-shrink: 0;
+}
+#toolbar button {
+  flex: 1; padding: 10px; font-size: 14px; background: #1a1a2e; color: #fff;
+  border: 1px solid #333355; border-radius: 4px; cursor: pointer;
+}
+#toolbar button:hover { background: #16213e; }
+#btn-arrest { font-weight: bold; }
+#btn-arrest.active { background: #CC0000; border-color: #FF0000; }
+</style>
+</head>
+<body>
+
+<!-- ==================== CONFIG SCREEN ==================== -->
+<div id="config-screen">
+  <h1>Simulador de Monitor Multiparamétrico</h1>
+
+  <div class="config-row"><label>Ritmo:</label>
+    <select id="cfg-rhythm">
+      <option>Ritmo Sinusal</option>
+      <option>Fibrilación Auricular</option>
+      <option>Taquicardia</option>
+      <option>Bradicardia</option>
+    </select>
+  </div>
+  <div class="config-row"><label>Derivación:</label>
+    <select id="cfg-lead">
+      <option>II</option><option>I</option><option>III</option>
+      <option>aVR</option><option>aVL</option><option>aVF</option>
+      <option>V1</option><option>V2</option><option>V3</option>
+      <option>V4</option><option>V5</option><option>V6</option>
+    </select>
+  </div>
+  <div class="config-row"><label>FC (bpm):</label><input id="cfg-hr" type="number" value="72"></div>
+  <div class="config-row"><label>SpO2 (%):</label><input id="cfg-spo2" type="number" value="98"></div>
+  <div class="config-row"><label>FR (rpm):</label><input id="cfg-rr" type="number" value="14"></div>
+  <div class="config-row"><label>EtCO2 (mmHg):</label><input id="cfg-etco2" type="number" value="38"></div>
+  <div class="config-row"><label>NIBP (mmHg):</label>
+    <div class="nibp-group">
+      <input id="cfg-sys" type="number" value="120">
+      <span>/</span>
+      <input id="cfg-dia" type="number" value="80">
+    </div>
+  </div>
+  <div class="config-row"><label>Temp (°C):</label><input id="cfg-temp" type="number" value="36.6" step="0.1"></div>
+
+  <button id="btn-start">Comenzar</button>
+</div>
+
+<!-- ==================== MONITOR SCREEN ==================== -->
+<div id="monitor-screen">
+  <div id="monitor-top">
+    <div id="waveform-area">
+      <canvas id="canvas-ecg"></canvas>
+      <canvas id="canvas-ppg"></canvas>
+      <canvas id="canvas-resp"></canvas>
+      <canvas id="canvas-co2"></canvas>
+    </div>
+    <div id="param-panel">
+      <div id="alarm-indicator">⚠ ALARMA ⚠</div>
+
+      <div class="param-frame" style="color:#00FF00">
+        <span class="param-name">HR</span>
+        <span class="param-value" id="val-hr">72</span>
+        <span class="param-unit">bpm</span>
+      </div>
+      <div class="param-frame" style="color:#00FFFF">
+        <span class="param-name">SpO2</span>
+        <span class="param-value" id="val-spo2">98</span>
+        <span class="param-unit">%</span>
+      </div>
+      <div class="param-frame" style="color:#FFFF00">
+        <span class="param-name">FR</span>
+        <span class="param-value" id="val-rr">14</span>
+        <span class="param-unit">rpm</span>
+      </div>
+      <div class="param-frame" style="color:#FFFFFF">
+        <span class="param-name">EtCO2</span>
+        <span class="param-value" id="val-etco2">38</span>
+        <span class="param-unit">mmHg</span>
+      </div>
+      <div class="param-frame" style="color:#FF4444">
+        <span class="param-name">NIBP</span>
+        <span class="param-value" id="val-nibp">120/80</span>
+        <span class="param-unit" id="val-map">(93) mmHg</span>
+      </div>
+      <div class="param-frame" style="color:#FF88CC">
+        <span class="param-name">Temp</span>
+        <span class="param-value" id="val-temp">36.6</span>
+        <span class="param-unit">°C</span>
+      </div>
+    </div>
+  </div>
+  <div id="toolbar">
+    <button id="btn-silence">Silenciar Alarma</button>
+    <button id="btn-mute">Mute</button>
+    <button id="btn-arrest">Paro Cardíaco</button>
+    <button id="btn-back">Volver al Menú</button>
+  </div>
+</div>
+
+<script>
+// ===================================================================
+//  CONFIGURATION & STATE
+// ===================================================================
+const CFG = {};
+let running = false;
+let arrestActive = false;
+let muted = false;
+let alarmSilenced = false;
+let silenceRemaining = 0;
+let silenceInterval = null;
+let spo2Decay = 0;
+let spo2DecayInterval = null;
+let alarmFlashInterval = null;
+let alarmFlashOn = false;
+let animFrameId = null;
+
+// Audio context (created on user gesture)
+let audioCtx = null;
+
+// Waveform buffers — circular buffers storing N seconds of samples
+const FS = 150; // virtual sample rate
+const ECG_WIN = 5;   // seconds
+const RESP_WIN = 20;
+const ECG_LEN = ECG_WIN * FS;   // 750
+const RESP_LEN = RESP_WIN * FS;  // 3000
+
+let ecgBuf, ppgBuf, respBuf, co2Buf;
+let sampleIdx = 0;
+let ecgWritePos = 0;
+let respWritePos = 0;
+
+// Pre-generated full signals (60 s)
+let ecgFull, ppgFull, respFull, co2Full;
+
+// R-peak detection
+let prevEcg = 0;
+let samplesSinceBeep = 999;
+const REFRACTORY = Math.round(0.3 * FS);
+const ECG_THRESH = 0.4;
+
+// Timing
+let lastFrameTime = 0;
+let sampleAccum = 0;
+
+// ===================================================================
+//  SIGNAL GENERATION
+// ===================================================================
+
+// Build one heartbeat template, then tile it across duration.
+// Uses sum-of-Gaussians for PQRST, with widths tuned for visibility.
+function generateECG(duration, fs, hr, rhythm) {
+  const N = duration * fs;
+  const signal = new Float32Array(N);
+  const beatSamples = Math.round((60 / hr) * fs);
+
+  // Each wave: amplitude, center (fraction of beat), sigma (fraction of beat)
+  // Wider sigmas = more visible morphology
+  const waves = [
+    { a:  0.18, c: 0.16, s: 0.055 },  // P wave
+    { a: -0.10, c: 0.27, s: 0.015 },  // Q wave
+    { a:  1.00, c: 0.30, s: 0.015 },  // R wave
+    { a: -0.18, c: 0.33, s: 0.015 },  // S wave
+    { a:  0.25, c: 0.52, s: 0.070 },  // T wave
+  ];
+
+  if (rhythm === 'Fibrilación Auricular') {
+    waves[0].a = 0; // no P wave in AF
+  }
+
+  // --- AF: irregular RR intervals ---
+  if (rhythm === 'Fibrilación Auricular') {
+    let pos = 0;
+    while (pos < N) {
+      const jitter = 0.6 + Math.random() * 0.8;
+      const thisBeat = Math.round(beatSamples * jitter);
+      for (let j = 0; j < thisBeat && pos + j < N; j++) {
+        const t = j / thisBeat;
+        let v = 0;
+        for (const w of waves) {
+          const d = t - w.c;
+          v += w.a * Math.exp(-(d * d) / (2 * w.s * w.s));
+        }
+        v += 0.03 * (Math.random() - 0.5); // fibrillatory baseline
+        signal[pos + j] = v;
+      }
+      pos += thisBeat;
+    }
+  } else {
+    // --- Regular rhythm ---
+    // Build one template beat
+    const tmpl = new Float32Array(beatSamples);
+    for (let j = 0; j < beatSamples; j++) {
+      const t = j / beatSamples;
+      let v = 0;
+      for (const w of waves) {
+        const d = t - w.c;
+        v += w.a * Math.exp(-(d * d) / (2 * w.s * w.s));
+      }
+      tmpl[j] = v;
+    }
+    // Tile the template across the full duration
+    for (let i = 0; i < N; i++) {
+      signal[i] = tmpl[i % beatSamples];
+    }
+  }
+
+  // Add subtle noise
+  for (let i = 0; i < N; i++) {
+    signal[i] += 0.008 * (Math.random() - 0.5);
+  }
+
+  return signal;
+}
+
+function generatePPG(duration, fs, hr) {
+  const N = duration * fs;
+  const signal = new Float32Array(N);
+  const beatSamples = Math.round((60 / hr) * fs);
+
+  // Build one PPG pulse template — wide, smooth shape
+  const tmpl = new Float32Array(beatSamples);
+  for (let j = 0; j < beatSamples; j++) {
+    const t = j / beatSamples;
+    // Systolic peak: wide Gaussian
+    const sys = Math.exp(-((t - 0.22) ** 2) / (2 * 0.055 ** 2));
+    // Dicrotic notch + secondary wave
+    const dia = 0.35 * Math.exp(-((t - 0.44) ** 2) / (2 * 0.065 ** 2));
+    tmpl[j] = sys + dia;
+  }
+
+  for (let i = 0; i < N; i++) {
+    signal[i] = tmpl[i % beatSamples] + 0.005 * (Math.random() - 0.5);
+  }
+  return signal;
+}
+
+function generateResp(duration, fs, rr) {
+  const N = duration * fs;
+  const signal = new Float32Array(N);
+  const freq = rr / 60;
+  for (let i = 0; i < N; i++) {
+    signal[i] = Math.sin(2 * Math.PI * freq * i / fs) + 0.01 * (Math.random() - 0.5);
+  }
+  return signal;
+}
+
+function generateCO2(duration, fs, rr, etco2) {
+  const N = duration * fs;
+  const signal = new Float32Array(N);
+  if (rr <= 0) return signal;
+
+  const breathSamples = Math.round((60 / rr) * fs);
+  if (breathSamples < 4) return signal;
+
+  const inspFrac = 0.40, upFrac = 0.08, platFrac = 0.35;
+
+  for (let start = 0; start < N; start += breathSamples) {
+    const n = Math.min(breathSamples, N - start);
+    const nInsp = Math.round(n * inspFrac);
+    const nUp   = Math.round(n * upFrac);
+    const nPlat = Math.round(n * platFrac);
+    const nDown = n - nInsp - nUp - nPlat;
+
+    let idx = start + nInsp;
+    for (let j = 0; j < nUp && idx + j < N; j++) {
+      signal[idx + j] = etco2 * (j / nUp);
+    }
+    idx += nUp;
+    for (let j = 0; j < nPlat && idx + j < N; j++) {
+      signal[idx + j] = etco2;
+    }
+    idx += nPlat;
+    for (let j = 0; j < nDown && idx + j < N; j++) {
+      signal[idx + j] = etco2 * (1 - j / nDown);
+    }
+  }
+  return signal;
+}
+
+// ===================================================================
+//  AUDIO (Web Audio API)
+// ===================================================================
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playTone(freq, durationMs, volume) {
+  if (muted || !audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + durationMs / 1000);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + durationMs / 1000 + 0.01);
+}
+
+function playHeartbeepBeep(spo2) {
+  if (muted) return;
+  ensureAudio();
+  const freq = 400 + (spo2 / 100) * 600;
+  playTone(Math.max(400, Math.min(1000, freq)), 80, 0.2);
+}
+
+let alarmOscActive = false;
+let alarmToggle = false;
+let alarmTimeout = null;
+function startAlarm() {
+  if (alarmOscActive) return;
+  alarmOscActive = true;
+  alarmToggle = false;
+  playAlarmTick();
+}
+function playAlarmTick() {
+  if (!alarmOscActive) return;
+  if (!muted && !alarmSilenced) {
+    ensureAudio();
+    playTone(alarmToggle ? 1000 : 800, 300, 0.35);
+    alarmToggle = !alarmToggle;
+  }
+  alarmTimeout = setTimeout(playAlarmTick, 800);
+}
+function stopAlarm() {
+  alarmOscActive = false;
+  if (alarmTimeout) { clearTimeout(alarmTimeout); alarmTimeout = null; }
+}
+
+// ===================================================================
+//  CANVAS DRAWING
+// ===================================================================
+
+// Sync canvas backing store to its CSS layout size (no DPR scaling)
+function syncCanvasSize(canvas) {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+}
+
+function drawWaveform(canvas, buffer, writePos, label, color, yMin, yMax) {
+  syncCanvasSize(canvas);
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  if (W === 0 || H === 0) return;
+
+  // Reset any accumulated transforms
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // Clear
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // Label
+  ctx.fillStyle = color;
+  ctx.font = 'bold 15px Arial';
+  ctx.fillText(label, 8, 22);
+
+  // Waveform line
+  const len = buffer.length;
+  const yRange = yMax - yMin;
+  const gapSize = Math.max(6, Math.round(len * 0.008)); // small gap at write head
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.8;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  let started = false;
+
+  for (let i = 0; i < len; i++) {
+    // Read from oldest sample to newest
+    const ri = (writePos + 1 + i) % len;
+
+    // Create a gap near the write head (sweep erasure effect)
+    const distToHead = (writePos - ri + len) % len;
+    if (distToHead < gapSize) {
+      if (started) ctx.stroke();
+      ctx.beginPath();
+      started = false;
+      continue;
+    }
+
+    const x = (i / len) * W;
+    const y = H - ((buffer[ri] - yMin) / yRange) * H;
+
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  if (started) ctx.stroke();
+}
+
+// ===================================================================
+//  MAIN LOOP
+// ===================================================================
+
+function frame(timestamp) {
+  if (!running) return;
+  animFrameId = requestAnimationFrame(frame);
+
+  if (!lastFrameTime) { lastFrameTime = timestamp; return; }
+  const dt = (timestamp - lastFrameTime) / 1000;
+  lastFrameTime = timestamp;
+
+  // How many samples to advance this frame
+  sampleAccum += dt * FS;
+  const samplesToWrite = Math.floor(sampleAccum);
+  sampleAccum -= samplesToWrite;
+
+  for (let s = 0; s < samplesToWrite; s++) {
+    const idx = sampleIdx % ecgFull.length;
+
+    if (arrestActive) {
+      ecgBuf[ecgWritePos] = 0;
+      ppgBuf[ecgWritePos] = 0;
+      respBuf[respWritePos] = 0;
+      co2Buf[respWritePos] = 0;
+    } else {
+      const ecgVal = ecgFull[idx];
+      ecgBuf[ecgWritePos] = ecgVal;
+      ppgBuf[ecgWritePos] = ppgFull[idx];
+      respBuf[respWritePos] = respFull[idx];
+      co2Buf[respWritePos] = co2Full[idx];
+
+      // R-peak detection for heartbeat beep
+      samplesSinceBeep++;
+      if (prevEcg < ECG_THRESH && ecgVal >= ECG_THRESH && samplesSinceBeep >= REFRACTORY) {
+        samplesSinceBeep = 0;
+        playHeartbeepBeep(CFG.spo2);
+      }
+      prevEcg = ecgVal;
+    }
+
+    ecgWritePos = (ecgWritePos + 1) % ECG_LEN;
+    respWritePos = (respWritePos + 1) % RESP_LEN;
+    sampleIdx++;
+  }
+
+  // Draw all four waveforms
+  drawWaveform(document.getElementById('canvas-ecg'),  ecgBuf,  ecgWritePos,  'ECG',   '#00FF00', -0.5, 1.2);
+  drawWaveform(document.getElementById('canvas-ppg'),  ppgBuf,  ecgWritePos,  'Pleth', '#00FFFF', -0.2, 1.4);
+  drawWaveform(document.getElementById('canvas-resp'), respBuf, respWritePos, 'RESP',  '#FFFF00', -1.5, 1.5);
+  drawWaveform(document.getElementById('canvas-co2'),  co2Buf,  respWritePos, 'CO2',   '#FFFFFF', -3, CFG.etco2 * 1.3);
+
+  // Update numeric displays
+  if (arrestActive) {
+    document.getElementById('val-rr').textContent = '0';
+    document.getElementById('val-etco2').textContent = '0';
+    document.getElementById('val-spo2').textContent = Math.round(spo2Decay);
+  } else {
+    document.getElementById('val-hr').textContent = CFG.hr;
+    document.getElementById('val-spo2').textContent = CFG.spo2;
+    document.getElementById('val-rr').textContent = CFG.rr;
+    document.getElementById('val-etco2').textContent = CFG.etco2;
+  }
+}
+
+// ===================================================================
+//  CONTROLS
+// ===================================================================
+
+function startSimulation() {
+  ensureAudio();
+
+  CFG.rhythm = document.getElementById('cfg-rhythm').value;
+  CFG.lead   = document.getElementById('cfg-lead').value;
+  CFG.hr     = parseInt(document.getElementById('cfg-hr').value) || 72;
+  CFG.spo2   = parseInt(document.getElementById('cfg-spo2').value) || 98;
+  CFG.rr     = parseInt(document.getElementById('cfg-rr').value) || 14;
+  CFG.etco2  = parseInt(document.getElementById('cfg-etco2').value) || 38;
+  CFG.sys    = parseInt(document.getElementById('cfg-sys').value) || 120;
+  CFG.dia    = parseInt(document.getElementById('cfg-dia').value) || 80;
+  CFG.temp   = parseFloat(document.getElementById('cfg-temp').value) || 36.6;
+
+  // Adjust HR for rhythm presets
+  if (CFG.rhythm === 'Taquicardia') CFG.hr = Math.max(CFG.hr, 140);
+  if (CFG.rhythm === 'Bradicardia') CFG.hr = Math.min(CFG.hr, 45);
+
+  // Generate signals (60 seconds)
+  ecgFull  = generateECG(60, FS, CFG.hr, CFG.rhythm);
+  ppgFull  = generatePPG(60, FS, CFG.hr);
+  respFull = generateResp(60, FS, CFG.rr);
+  co2Full  = generateCO2(60, FS, CFG.rr, CFG.etco2);
+
+  // Init circular buffers (filled with zeros = flat line until data arrives)
+  ecgBuf  = new Float32Array(ECG_LEN);
+  ppgBuf  = new Float32Array(ECG_LEN);
+  respBuf = new Float32Array(RESP_LEN);
+  co2Buf  = new Float32Array(RESP_LEN);
+  ecgWritePos = 0;
+  respWritePos = 0;
+  sampleIdx = 0;
+  prevEcg = 0;
+  samplesSinceBeep = REFRACTORY;
+
+  // Update parameter displays
+  document.getElementById('val-hr').textContent = CFG.hr;
+  document.getElementById('val-hr').style.color = '#00FF00';
+  document.getElementById('val-spo2').textContent = CFG.spo2;
+  document.getElementById('val-rr').textContent = CFG.rr;
+  document.getElementById('val-etco2').textContent = CFG.etco2;
+  document.getElementById('val-nibp').textContent = CFG.sys + '/' + CFG.dia;
+  const map = Math.round(CFG.dia + (CFG.sys - CFG.dia) / 3);
+  document.getElementById('val-map').textContent = '(' + map + ') mmHg';
+  document.getElementById('val-temp').textContent = CFG.temp.toFixed(1);
+
+  // Reset state
+  arrestActive = false;
+  muted = false;
+  alarmSilenced = false;
+  spo2Decay = CFG.spo2;
+  document.getElementById('btn-mute').textContent = 'Mute';
+  document.getElementById('btn-arrest').classList.remove('active');
+  document.getElementById('alarm-indicator').style.display = 'none';
+  document.getElementById('btn-silence').textContent = 'Silenciar Alarma';
+
+  // Show monitor screen
+  document.getElementById('config-screen').style.display = 'none';
+  document.getElementById('monitor-screen').style.display = 'flex';
+
+  // Start animation after layout settles
+  setTimeout(() => {
+    running = true;
+    lastFrameTime = 0;
+    sampleAccum = 0;
+    animFrameId = requestAnimationFrame(frame);
+  }, 50);
+}
+
+function returnToMenu() {
+  running = false;
+  if (animFrameId) cancelAnimationFrame(animFrameId);
+  stopAlarm();
+  clearInterval(spo2DecayInterval);
+  clearInterval(alarmFlashInterval);
+  clearInterval(silenceInterval);
+  arrestActive = false;
+  document.getElementById('monitor-screen').style.display = 'none';
+  document.getElementById('config-screen').style.display = 'flex';
+}
+
+function toggleArrest() {
+  arrestActive = !arrestActive;
+  const btn = document.getElementById('btn-arrest');
+  const indicator = document.getElementById('alarm-indicator');
+
+  if (arrestActive) {
+    btn.classList.add('active');
+    indicator.style.display = 'block';
+    spo2Decay = CFG.spo2;
+
+    startAlarm();
+
+    spo2DecayInterval = setInterval(() => {
+      if (arrestActive && spo2Decay > 0) spo2Decay = Math.max(0, spo2Decay - 1);
+    }, 2000);
+
+    alarmFlashInterval = setInterval(() => {
+      alarmFlashOn = !alarmFlashOn;
+      indicator.style.background = alarmFlashOn ? '#660000' : '#330000';
+      const hrEl = document.getElementById('val-hr');
+      hrEl.textContent = '0';
+      hrEl.style.color = alarmFlashOn ? '#FF0000' : '#330000';
+    }, 500);
+
+    document.getElementById('val-hr').textContent = '0';
+    document.getElementById('val-hr').style.color = '#FF0000';
+  } else {
+    btn.classList.remove('active');
+    indicator.style.display = 'none';
+    stopAlarm();
+    clearInterval(spo2DecayInterval);
+    clearInterval(alarmFlashInterval);
+    spo2Decay = CFG.spo2;
+
+    document.getElementById('val-hr').textContent = CFG.hr;
+    document.getElementById('val-hr').style.color = '#00FF00';
+    document.getElementById('val-spo2').textContent = CFG.spo2;
+    document.getElementById('val-rr').textContent = CFG.rr;
+    document.getElementById('val-etco2').textContent = CFG.etco2;
+  }
+}
+
+function toggleMute() {
+  muted = !muted;
+  document.getElementById('btn-mute').textContent = muted ? 'Unmute' : 'Mute';
+}
+
+function silenceAlarm() {
+  alarmSilenced = true;
+  silenceRemaining = 120;
+  document.getElementById('btn-silence').textContent = 'Silenciado (' + silenceRemaining + 's)';
+  clearInterval(silenceInterval);
+  silenceInterval = setInterval(() => {
+    silenceRemaining--;
+    if (silenceRemaining <= 0) {
+      clearInterval(silenceInterval);
+      alarmSilenced = false;
+      document.getElementById('btn-silence').textContent = 'Silenciar Alarma';
+    } else {
+      document.getElementById('btn-silence').textContent = 'Silenciado (' + silenceRemaining + 's)';
+    }
+  }, 1000);
+}
+
+// ===================================================================
+//  EVENT LISTENERS
+// ===================================================================
+
+document.getElementById('btn-start').addEventListener('click', startSimulation);
+document.getElementById('btn-back').addEventListener('click', returnToMenu);
+document.getElementById('btn-arrest').addEventListener('click', toggleArrest);
+document.getElementById('btn-mute').addEventListener('click', toggleMute);
+document.getElementById('btn-silence').addEventListener('click', silenceAlarm);
+
+</script>
+</body>
+</html>
